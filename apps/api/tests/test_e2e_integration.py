@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 from src.main import app
 from src.models.item import ItemDescription
+from src.models.scout import MarketScoutReport
 
 client = TestClient(app)
 
@@ -77,3 +78,53 @@ def test_e2e_byok_openai_fallback_on_invalid_key():
     item = ItemDescription(**data["item"])
     assert item.name
     assert item.condition
+
+
+def test_e2e_market_scout_search():
+    """Verify Market Scout search endpoint returns comprehensive cross-platform report."""
+    headers = {
+        "X-LLM-Provider": "mock",
+        "X-API-Key": "test_key",
+    }
+    payload = {
+        "text": "Apple MacBook Air M1 2020 8GB 256GB mulus fullset",
+        "mock": True,
+        "max_results_per_platform": 5,
+    }
+    response = client.post("/api/scout/search", json=payload, headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+
+    report = MarketScoutReport(**data)
+    assert report.total_listings_found > 0
+    assert report.overall_lowest_price > 0
+    assert report.overall_highest_price >= report.overall_lowest_price
+    assert report.best_platform_recommendation in ["Tokopedia", "Shopee", "Facebook Marketplace"]
+    assert len(report.platform_results) == 3
+
+
+def test_e2e_full_analyze_flow():
+    """Verify full multi-stage analysis flow: Item parsing + Market Scout Agent."""
+    headers = {
+        "X-LLM-Provider": "mock",
+        "X-API-Key": "test_key",
+    }
+    payload = {
+        "text": "Dijual sepatu Nike Air Jordan 1 Retro High Chicago size 42 kondisi like new dengan box",
+        "mock": True,
+    }
+    response = client.post("/api/analyze", json=payload, headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["status"] == "success"
+    assert "parsed_item" in data
+    assert "scout_report" in data
+
+    parsed = ItemDescription(**data["parsed_item"])
+    assert "Jordan" in parsed.name or "Nike" in parsed.name
+
+    report = MarketScoutReport(**data["scout_report"])
+    assert report.total_listings_found > 0
+    assert report.overall_average_price > 0
+    assert report.summary_insights is not None

@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from src.routes.health import router as health_router
 from src.routes.parser import router as parser_router
+from src.routes.scout import router as scout_router
 
 app = FastAPI(
     title="Reseller AI Assistant API",
@@ -28,6 +29,7 @@ app.add_middleware(
 # Include API routers
 app.include_router(health_router)
 app.include_router(parser_router)
+app.include_router(scout_router)
 
 
 @app.exception_handler(ValueError)
