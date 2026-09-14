@@ -271,21 +271,25 @@ def _evaluate_llm_customer_persona(
             credentials.provider.lower(), "gpt-4o-mini"
         )
         provider = credentials.provider.lower()
-        if provider == "anthropic" and not target_model.startswith("anthropic/"):
+        if (provider == "anthropic" or provider == "custom_anthropic") and not target_model.startswith("anthropic/"):
             target_model = f"anthropic/{target_model}"
-        elif provider == "openai" and not target_model.startswith("openai/"):
+        elif (provider == "openai" or provider == "custom_openai") and not target_model.startswith("openai/"):
             target_model = f"openai/{target_model}"
 
-        response: CustomerEvaluationSchema = client.chat.completions.create(
-            model=target_model,
-            response_model=CustomerEvaluationSchema,
-            messages=[
+        kwargs = {
+            "model": target_model,
+            "response_model": CustomerEvaluationSchema,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            api_key=credentials.api_key,
-            temperature=0.3,
-        )
+            "api_key": credentials.api_key,
+            "temperature": 0.3,
+        }
+        if credentials.base_url:
+            kwargs["api_base"] = credentials.base_url
+
+        response: CustomerEvaluationSchema = client.chat.completions.create(**kwargs)
         return response
 
     except Exception as e:

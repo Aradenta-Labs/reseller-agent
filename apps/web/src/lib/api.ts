@@ -100,13 +100,16 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
  * Extract BYOK headers from current Zustand settings store state
  */
 export function getBYOKHeaders(): Record<string, string> {
-  const { provider, apiKey, model } = useSettingsStore.getState();
+  const { provider, apiKey, model, baseUrl } = useSettingsStore.getState();
   const headers: Record<string, string> = {
     "X-LLM-Provider": provider,
     "X-API-Key": apiKey || "",
   };
   if (model) {
     headers["X-LLM-Model"] = model;
+  }
+  if (baseUrl && (provider === "custom_openai" || provider === "custom_anthropic" || baseUrl.trim())) {
+    headers["X-LLM-Base-URL"] = baseUrl.trim();
   }
   return headers;
 }

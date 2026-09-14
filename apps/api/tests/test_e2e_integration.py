@@ -80,6 +80,41 @@ def test_e2e_byok_openai_fallback_on_invalid_key():
     assert item.condition
 
 
+def test_e2e_byok_custom_openai_and_anthropic_headers():
+    """Verify acceptance of custom OpenAI and Anthropic compatible provider headers and base URL."""
+    # Custom OpenAI (e.g. Ollama/vLLM/DeepSeek)
+    headers_openai = {
+        "X-LLM-Provider": "custom_openai",
+        "X-API-Key": "test_local_key",
+        "X-LLM-Model": "deepseek-chat",
+        "X-LLM-Base-URL": "http://localhost:11434/v1",
+    }
+    payload = {
+        "text": "Apple iPhone 13 Pro 128GB Sierra Blue",
+    }
+    response = client.post("/api/parse-item", json=payload, headers=headers_openai)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert data["provider_used"] == "custom_openai"
+    assert data["model_used"] == "deepseek-chat"
+    assert data["item"]["name"]
+
+    # Custom Anthropic (e.g. self-hosted Claude proxy)
+    headers_anthropic = {
+        "X-LLM-Provider": "custom_anthropic",
+        "X-API-Key": "test_claude_key",
+        "X-LLM-Model": "claude-3-5-sonnet-20241022",
+        "X-LLM-Base-URL": "http://localhost:8080",
+    }
+    response_ant = client.post("/api/parse-item", json=payload, headers=headers_anthropic)
+    assert response_ant.status_code == 200
+    data_ant = response_ant.json()
+    assert data_ant["status"] == "success"
+    assert data_ant["provider_used"] == "custom_anthropic"
+    assert data_ant["item"]["name"]
+
+
 def test_e2e_market_scout_search():
     """Verify Market Scout search endpoint returns comprehensive cross-platform report."""
     headers = {

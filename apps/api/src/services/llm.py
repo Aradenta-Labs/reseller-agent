@@ -11,6 +11,8 @@ T = TypeVar("T", bound=BaseModel)
 DEFAULT_MODELS = {
     "openai": "gpt-4o-mini",
     "anthropic": "claude-3-5-haiku-20241022",
+    "custom_openai": "gpt-4o-mini",
+    "custom_anthropic": "claude-3-5-haiku-20241022",
     "openrouter": "openrouter/auto",
     "groq": "groq/llama-3.3-70b-versatile",
     "mock": "mock-model",
@@ -24,6 +26,7 @@ class LLMService:
         self.credentials = credentials
         self.provider = credentials.provider.lower() if credentials.provider else "mock"
         self.api_key = credentials.api_key
+        self.base_url = credentials.base_url
         self.model = credentials.model or DEFAULT_MODELS.get(self.provider, "gpt-4o-mini")
 
     def parse_item_description(
@@ -74,18 +77,22 @@ class LLMService:
 
             # Format target model string for litellm if provider prefix needed
             target_model = self.model
-            if self.provider == "anthropic" and not target_model.startswith("anthropic/"):
+            if (self.provider == "anthropic" or self.provider == "custom_anthropic") and not target_model.startswith("anthropic/"):
                 target_model = f"anthropic/{target_model}"
-            elif self.provider == "openai" and not target_model.startswith("openai/"):
+            elif (self.provider == "openai" or self.provider == "custom_openai") and not target_model.startswith("openai/"):
                 target_model = f"openai/{target_model}"
 
-            response = client.chat.completions.create(
-                model=target_model,
-                response_model=ItemDescription,
-                messages=messages,
-                api_key=self.api_key,
-                temperature=0.2,
-            )
+            kwargs = {
+                "model": target_model,
+                "response_model": ItemDescription,
+                "messages": messages,
+                "api_key": self.api_key,
+                "temperature": 0.2,
+            }
+            if self.base_url:
+                kwargs["api_base"] = self.base_url
+
+            response = client.chat.completions.create(**kwargs)
             return response
 
         except Exception as e:

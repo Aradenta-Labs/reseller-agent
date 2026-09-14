@@ -18,6 +18,7 @@ import {
   Cpu,
   Info,
   SlidersHorizontal,
+  Globe,
 } from "lucide-react";
 
 interface ProviderConfig {
@@ -26,6 +27,7 @@ interface ProviderConfig {
   tagline: string;
   defaultModel: string;
   requiresKey: boolean;
+  requiresBaseUrl?: boolean;
   popularModels: string[];
 }
 
@@ -33,18 +35,46 @@ const PROVIDERS: ProviderConfig[] = [
   {
     id: "openai",
     name: "OpenAI",
-    tagline: "GPT-4o & GPT-4o-mini (Vision + Structured Tool Calling)",
+    tagline: "Official OpenAI (GPT-4o & GPT-4o-mini)",
     defaultModel: DEFAULT_MODELS.openai,
     requiresKey: true,
+    requiresBaseUrl: false,
     popularModels: ["gpt-4o-mini", "gpt-4o", "o3-mini"],
   },
   {
     id: "anthropic",
     name: "Anthropic",
-    tagline: "Claude 3.5 Sonnet & Claude 3.5 Haiku",
+    tagline: "Official Anthropic Claude 3.5 Sonnet & Haiku",
     defaultModel: DEFAULT_MODELS.anthropic,
     requiresKey: true,
+    requiresBaseUrl: false,
     popularModels: ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"],
+  },
+  {
+    id: "custom_openai",
+    name: "Custom OpenAI-Compatible",
+    tagline: "Ollama, vLLM, LM Studio, OneAPI, LiteLLM Proxy, DeepSeek, Groq",
+    defaultModel: DEFAULT_MODELS.custom_openai,
+    requiresKey: false,
+    requiresBaseUrl: true,
+    popularModels: [
+      "gpt-4o-mini",
+      "deepseek-chat",
+      "llama-3.3-70b-versatile",
+      "qwen2.5-coder-32b",
+    ],
+  },
+  {
+    id: "custom_anthropic",
+    name: "Custom Anthropic-Compatible",
+    tagline: "Self-hosted Claude proxy, Bedrock gateway, or enterprise endpoint",
+    defaultModel: DEFAULT_MODELS.custom_anthropic,
+    requiresKey: false,
+    requiresBaseUrl: true,
+    popularModels: [
+      "claude-3-5-sonnet-20241022",
+      "claude-3-5-haiku-20241022",
+    ],
   },
   {
     id: "openrouter",
@@ -52,6 +82,7 @@ const PROVIDERS: ProviderConfig[] = [
     tagline: "Multi-model gateway across open-source & proprietary models",
     defaultModel: DEFAULT_MODELS.openrouter,
     requiresKey: true,
+    requiresBaseUrl: false,
     popularModels: [
       "anthropic/claude-3.5-sonnet",
       "openai/gpt-4o-mini",
@@ -65,6 +96,7 @@ const PROVIDERS: ProviderConfig[] = [
     tagline: "Local simulated agent swarm for testing without spending tokens",
     defaultModel: DEFAULT_MODELS.mock,
     requiresKey: false,
+    requiresBaseUrl: false,
     popularModels: ["mock-v1"],
   },
 ];
@@ -74,6 +106,7 @@ export function BYOKModal() {
     provider,
     apiKey,
     model,
+    baseUrl,
     isSettingsOpen,
     setSettingsOpen,
     saveSettings,
@@ -83,6 +116,7 @@ export function BYOKModal() {
   const [selectedProvider, setSelectedProvider] = useState<LLMProvider>(provider);
   const [inputKey, setInputKey] = useState<string>(apiKey);
   const [inputModel, setInputModel] = useState<string>(model);
+  const [inputBaseUrl, setInputBaseUrl] = useState<string>(baseUrl || "");
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState<{
     success: boolean;
@@ -96,6 +130,11 @@ export function BYOKModal() {
   const handleProviderChange = (newProvider: LLMProvider) => {
     setSelectedProvider(newProvider);
     setInputModel(DEFAULT_MODELS[newProvider]);
+    if (newProvider === "custom_openai" && !inputBaseUrl) {
+      setInputBaseUrl("http://localhost:11434/v1");
+    } else if (newProvider === "custom_anthropic" && !inputBaseUrl) {
+      setInputBaseUrl("http://localhost:8080");
+    }
     setTestResult(null);
   };
 
@@ -104,6 +143,7 @@ export function BYOKModal() {
       provider: selectedProvider,
       apiKey: inputKey.trim(),
       model: inputModel.trim() || DEFAULT_MODELS[selectedProvider],
+      baseUrl: inputBaseUrl.trim(),
     });
     setSettingsOpen(false);
   };
@@ -206,12 +246,46 @@ export function BYOKModal() {
             </div>
           </div>
 
+          {/* Base URL Section for Custom Providers */}
+          {currentProviderConfig?.requiresBaseUrl && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                  Custom Endpoint Base URL
+                </label>
+                <span className="text-[11px] text-zinc-400">
+                  {selectedProvider === "custom_openai" ? "e.g. /v1 appended" : "Gateway URL"}
+                </span>
+              </div>
+              <div className="relative">
+                <Globe className="absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-500" />
+                <input
+                  type="text"
+                  value={inputBaseUrl}
+                  onChange={(e) => setInputBaseUrl(e.target.value)}
+                  placeholder={
+                    selectedProvider === "custom_openai"
+                      ? "http://localhost:11434/v1 or https://api.deepseek.com/v1"
+                      : "http://localhost:8080 or your custom Anthropic gateway"
+                  }
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900 pl-9 pr-3.5 py-2 text-xs font-mono text-zinc-100 placeholder-zinc-500 focus:border-blue-500 focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <p className="text-[11px] text-zinc-400">
+                Compatible with any OpenAI/Anthropic API specification standard (Ollama, vLLM, LM Studio, OneAPI, LiteLLM Proxy).
+              </p>
+            </div>
+          )}
+
           {/* Key Input Section */}
-          {currentProviderConfig?.requiresKey ? (
+          {currentProviderConfig?.requiresKey || currentProviderConfig?.requiresBaseUrl ? (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
                   {currentProviderConfig.name} API Key
+                  {currentProviderConfig.requiresBaseUrl && (
+                    <span className="ml-1.5 lowercase font-normal text-zinc-400">(optional for local models)</span>
+                  )}
                 </label>
                 {inputKey && (
                   <button
@@ -228,7 +302,11 @@ export function BYOKModal() {
                 type="password"
                 value={inputKey}
                 onChange={(e) => setInputKey(e.target.value)}
-                placeholder={`sk-... or your ${currentProviderConfig.name} API key`}
+                placeholder={
+                  currentProviderConfig.requiresBaseUrl
+                    ? "sk-... or leave empty for unauthenticated local endpoints"
+                    : `sk-... or your ${currentProviderConfig.name} API key`
+                }
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3.5 py-2 text-xs font-mono text-zinc-100 placeholder-zinc-500 focus:border-blue-500 focus:outline-hidden focus:ring-1 focus:ring-blue-500"
               />
               <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">

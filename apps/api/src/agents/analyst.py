@@ -199,21 +199,25 @@ def _synthesize_llm_trends(
             credentials.provider.lower(), "gpt-4o-mini"
         )
         provider = credentials.provider.lower()
-        if provider == "anthropic" and not target_model.startswith("anthropic/"):
+        if (provider == "anthropic" or provider == "custom_anthropic") and not target_model.startswith("anthropic/"):
             target_model = f"anthropic/{target_model}"
-        elif provider == "openai" and not target_model.startswith("openai/"):
+        elif (provider == "openai" or provider == "custom_openai") and not target_model.startswith("openai/"):
             target_model = f"openai/{target_model}"
 
-        response = litellm.completion(
-            model=target_model,
-            messages=[
+        completion_kwargs = {
+            "model": target_model,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            api_key=credentials.api_key,
-            temperature=0.2,
-            max_tokens=400,
-        )
+            "api_key": credentials.api_key,
+            "temperature": 0.2,
+            "max_tokens": 400,
+        }
+        if credentials.base_url:
+            completion_kwargs["api_base"] = credentials.base_url
+
+        response = litellm.completion(**completion_kwargs)
 
         content = response.choices[0].message.content
         if content and content.strip():
