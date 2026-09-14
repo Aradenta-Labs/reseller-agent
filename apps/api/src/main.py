@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from src.routes.health import router as health_router
+from src.routes.orchestrate import router as orchestrate_router
 from src.routes.parser import router as parser_router
 from src.routes.scout import router as scout_router
 
@@ -30,6 +31,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(parser_router)
 app.include_router(scout_router)
+app.include_router(orchestrate_router)
 
 
 @app.exception_handler(ValueError)
