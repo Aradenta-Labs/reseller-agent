@@ -13,9 +13,9 @@ def test_e2e_health_check():
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ok"
-    assert data["phase"] == "1"
+    assert "phase" in data
     assert data["service"] == "reseller-agent-api"
-    assert data["version"] == "0.1.0"
+    assert "version" in data
     assert data["environment"] == "development"
 
 

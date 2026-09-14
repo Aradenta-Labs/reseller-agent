@@ -1,0 +1,31 @@
+{
+    # Global options
+    email {$ACME_EMAIL:admin@example.com}
+}
+
+{$DOMAIN:localhost} {
+    # Encode responses
+    encode gzip zstd
+
+    # API and SSE streaming backend routing
+    handle /api/* {
+        reverse_proxy api:8000 {
+            # Enable immediate streaming for Server-Sent Events (SSE)
+            flush_interval -1
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Frontend web routing
+    handle {
+        reverse_proxy web:3000 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+}

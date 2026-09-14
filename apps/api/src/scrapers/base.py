@@ -1,11 +1,80 @@
 """Base scraper models and interface for marketplace data acquisition."""
 
 from abc import ABC, abstractmethod
+import asyncio
 import math
+import os
+import random
 import re
 import statistics
-from typing import List, Optional
+import time
+from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
+
+# Global lock & timestamp tracker for rate limiting / cooldown across scrapers
+_LAST_SCRAPE_TIMESTAMP: float = 0.0
+_SCRAPER_RATE_LOCK = asyncio.Lock()
+
+# Realistic fingerprint pools for session randomization
+FINGERPRINT_POOL: List[Dict[str, Any]] = [
+    {
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "viewport": {"width": 1920, "height": 1080},
+        "locale": "id-ID",
+        "timezone_id": "Asia/Jakarta",
+        "platform": "macOS",
+    },
+    {
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        "viewport": {"width": 1440, "height": 900},
+        "locale": "id-ID",
+        "timezone_id": "Asia/Jakarta",
+        "platform": "Windows",
+    },
+    {
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "viewport": {"width": 1536, "height": 864},
+        "locale": "id-ID",
+        "timezone_id": "Asia/Jakarta",
+        "platform": "Windows",
+    },
+    {
+        "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "viewport": {"width": 1920, "height": 1080},
+        "locale": "id-ID",
+        "timezone_id": "Asia/Jakarta",
+        "platform": "Linux",
+    },
+]
+
+
+def get_random_fingerprint() -> Dict[str, Any]:
+    """Select a randomized browser fingerprint profile from the pool."""
+    return random.choice(FINGERPRINT_POOL)
+
+
+async def enforce_scraper_cooldown() -> None:
+    """Enforce a configurable cooldown between scraper operations from the container."""
+    global _LAST_SCRAPE_TIMESTAMP
+    cooldown_seconds = float(os.getenv("SCRAPER_COOLDOWN_SECONDS", "1.5"))
+    if cooldown_seconds <= 0:
+        return
+
+    async with _SCRAPER_RATE_LOCK:
+        now = time.time()
+        elapsed = now - _LAST_SCRAPE_TIMESTAMP
+        if elapsed < cooldown_seconds:
+            wait_time = cooldown_seconds - elapsed
+            await asyncio.sleep(wait_time)
+        _LAST_SCRAPE_TIMESTAMP = time.time()
+
+
+def get_scraper_proxy_config() -> Optional[Dict[str, str]]:
+    """Retrieve proxy configuration from SCRAPER_PROXY_URL env if present."""
+    proxy_url = os.getenv("SCRAPER_PROXY_URL")
+    if proxy_url and proxy_url.strip():
+        return {"server": proxy_url.strip()}
+    return None
 
 
 class ProductListing(BaseModel):
@@ -41,6 +110,9 @@ class ScrapeResult(BaseModel):
     error: Optional[str] = Field(
         None, description="Error message if scraping or parsing encountered issues"
     )
+    fallback_used: bool = Field(
+        False, description="Indicates whether fallback search (Tavily/Serper) was triggered"
+    )
 
 
 class BaseScraper(ABC):
@@ -60,6 +132,26 @@ class BaseScraper(ABC):
             ScrapeResult containing statistical summary and top listings.
         """
         pass
+
+    @classmethod
+    async def simulate_human_interaction(cls, page: Any) -> None:
+        """Simulate realistic human behavior (random smooth scrolling and mouse jiggle)."""
+        try:
+            # 1. Random mouse movement
+            await page.mouse.move(random.randint(100, 500), random.randint(100, 400))
+            await asyncio.sleep(random.uniform(0.1, 0.3))
+
+            # 2. Variable scrolling with small jitter
+            for _ in range(random.randint(1, 3)):
+                scroll_delta = random.randint(300, 700)
+                await page.evaluate(f"window.scrollBy(0, {scroll_delta})")
+                await asyncio.sleep(random.uniform(0.2, 0.5))
+
+            # 3. Micro hesitation
+            await page.mouse.move(random.randint(200, 700), random.randint(300, 600))
+            await asyncio.sleep(random.uniform(0.1, 0.2))
+        except Exception:
+            pass
 
     @classmethod
     def clean_idr_price(cls, raw_price: Optional[str]) -> Optional[float]:
@@ -199,6 +291,7 @@ class BaseScraper(ABC):
         listings: List[ProductListing],
         platform: Optional[str] = None,
         error: Optional[str] = None,
+        fallback_used: bool = False,
     ) -> ScrapeResult:
         """Calculate statistical metrics (min, max, mean, median) from a list of ProductListings.
 
@@ -206,6 +299,7 @@ class BaseScraper(ABC):
             listings: List of parsed ProductListing objects.
             platform: Platform name for the result.
             error: Optional error message if any step failed.
+            fallback_used: Whether fallback strategy was triggered.
 
         Returns:
             ScrapeResult containing statistical summaries and listings.
@@ -223,6 +317,7 @@ class BaseScraper(ABC):
                 sample_count=0,
                 top_listings=listings,
                 error=error,
+                fallback_used=fallback_used,
             )
 
         lowest = float(min(valid_prices))
@@ -239,4 +334,5 @@ class BaseScraper(ABC):
             sample_count=len(valid_prices),
             top_listings=listings,
             error=error,
+            fallback_used=fallback_used,
         )

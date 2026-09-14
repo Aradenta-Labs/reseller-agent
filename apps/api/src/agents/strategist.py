@@ -38,6 +38,145 @@ ONLINE_PLATFORM_FEE_RATE = 0.20  # 20% marketplace transaction & handling fee
 MIN_NET_MARGIN_RATE = 0.15      # 15% target minimum net profit margin
 
 
+def calculate_pricing(
+    market_prices: Optional[List[Dict[str, Any]]] = None,
+    scout_summary: Optional[Dict[str, Any]] = None,
+    capital_cost: Optional[float] = None,
+    fee_rate: float = ONLINE_PLATFORM_FEE_RATE,
+    min_margin_rate: float = MIN_NET_MARGIN_RATE,
+) -> Dict[str, Any]:
+    """Deterministic Python calculation engine for 3-tier pricing strategy.
+
+    This function MUST be used by the Pricing Strategist rather than relying on
+    LLM arithmetic to guarantee mathematical consistency:
+    - 20% online platform fee deducted from listing price
+    - Minimum 15% net profit margin requirement
+    - Fast Sale, Patient Sale, Direct/COD Sale tier generation
+    - Max recommended acquisition price calculation
+    """
+    scout = scout_summary or {}
+    prices_list = market_prices or []
+
+    # Step 1: Extract baseline statistical benchmarks
+    lowest_price = float(scout.get("overall_lowest_price") or 0.0)
+    highest_price = float(scout.get("overall_highest_price") or 0.0)
+    median_price = float(scout.get("overall_median_price") or 0.0)
+    average_price = float(scout.get("overall_average_price") or 0.0)
+
+    # If summary was empty but listings exist, compute on the fly
+    if (median_price == 0.0 or lowest_price == 0.0) and prices_list:
+        raw_prices = [
+            float(p["price"]) for p in prices_list if p.get("price") and float(p["price"]) > 0
+        ]
+        if raw_prices:
+            lowest_price = min(raw_prices)
+            highest_price = max(raw_prices)
+            average_price = sum(raw_prices) / len(raw_prices)
+            sorted_p = sorted(raw_prices)
+            mid = len(sorted_p) // 2
+            median_price = (sorted_p[mid] + sorted_p[~mid]) / 2.0
+
+    # Fallback benchmark if no listings were available
+    if median_price == 0.0:
+        median_price = 1_500_000.0
+        lowest_price = 1_200_000.0
+        highest_price = 1_800_000.0
+        average_price = 1_500_000.0
+
+    # Baseline benchmark price (use median as steady market anchor)
+    benchmark_price = median_price if median_price > 0 else average_price
+
+    # Step 2: Determine Tier Selling Prices
+    # Tier 1: Fast Sale (Online) - slightly below lowest or 5% below median for rapid turnover
+    fast_sale_price = round(min(lowest_price * 0.98 if lowest_price > 0 else benchmark_price * 0.90, benchmark_price * 0.92), -3)
+    if fast_sale_price <= 0:
+        fast_sale_price = round(benchmark_price * 0.90, -3)
+
+    # Tier 2: Patient Sale (Online) - target median / upper market price for max profit
+    patient_sale_price = round(benchmark_price, -3)
+    if patient_sale_price <= fast_sale_price:
+        patient_sale_price = round(fast_sale_price * 1.10, -3)
+
+    # Tier 3: Direct/Offline Sale (COD) - 0% platform fee, competitive local pricing
+    direct_sale_price = round(benchmark_price * 0.95, -3)
+
+    # Step 3: Financial Calculations per Tier
+    def _compute_single_tier(selling_price: float, tier_fee_rate: float, tier_name: str, description: str) -> Dict[str, Any]:
+        platform_fee = round(selling_price * tier_fee_rate, 2)
+        net_payout = round(selling_price - platform_fee, 2)
+        # Max buying price to guarantee at least min_margin_rate (e.g. 15% net margin): Net Payout / (1 + margin)
+        max_buy_for_margin = round(net_payout / (1.0 + min_margin_rate), -3)
+
+        tier_data: Dict[str, Any] = {
+            "tier_name": tier_name,
+            "description": description,
+            "listing_price": selling_price,
+            "platform_fee_rate": tier_fee_rate,
+            "estimated_platform_fee": platform_fee,
+            "net_payout": net_payout,
+            "max_recommended_buy_price": max_buy_for_margin,
+        }
+
+        if capital_cost is not None and capital_cost > 0:
+            net_profit = round(net_payout - capital_cost, 2)
+            roi_pct = round((net_profit / capital_cost) * 100.0, 2)
+            margin_pct = round((net_profit / selling_price) * 100.0, 2)
+            meets_margin = margin_pct >= (min_margin_rate * 100.0)
+
+            tier_data.update({
+                "capital_cost": capital_cost,
+                "projected_net_profit": net_profit,
+                "projected_roi_pct": roi_pct,
+                "profit_margin_pct": margin_pct,
+                "meets_target_margin": meets_margin,
+            })
+        else:
+            tier_data.update({
+                "meets_target_margin": True,
+            })
+
+        return tier_data
+
+    tiers: Dict[str, Any] = {
+        "fast_sale": _compute_single_tier(
+            fast_sale_price,
+            fee_rate,
+            "Fast Sale (Online)",
+            "Undercut competitors on Tokopedia/Shopee for 1-3 day turnaround.",
+        ),
+        "patient_sale": _compute_single_tier(
+            patient_sale_price,
+            fee_rate,
+            "Patient Sale (Online)",
+            "Optimized for maximum profit margin on online marketplaces (7-14 days).",
+        ),
+        "direct_sale": _compute_single_tier(
+            direct_sale_price,
+            0.0,
+            "Direct / Offline Sale (COD)",
+            "0% platform fees via Facebook Marketplace / local meetup (COD).",
+        ),
+    }
+
+    # Target acquisition price across baseline (based on patient sale payout with target margin)
+    patient_net = tiers["patient_sale"]["net_payout"]
+    target_buy_price = round(patient_net / (1.0 + min_margin_rate), -3)
+
+    return {
+        "currency": "IDR",
+        "benchmark_median_price": benchmark_price,
+        "platform_fee_rate": fee_rate,
+        "target_min_margin_rate": min_margin_rate,
+        "target_buy_price": target_buy_price,
+        "max_buy_price": target_buy_price,
+        "tiers": tiers,
+        "summary_recommendation": (
+            f"Target acquisition price: max Rp {int(target_buy_price):,} to secure ≥{int(min_margin_rate*100)}% net margin. "
+            f"Sell at Rp {int(fast_sale_price):,} for fast liquidation or Rp {int(patient_sale_price):,} for maximum yield."
+        ),
+    }
+
+
 # ============================================================================
 # AGENT 3: PRICING STRATEGIST
 # ============================================================================
@@ -61,126 +200,20 @@ async def run_pricing_strategist(
     capital_cost = state.get("capital_cost")
 
     try:
-        # Step 1: Extract baseline statistical benchmarks
-        lowest_price = float(scout_summary.get("overall_lowest_price") or 0.0)
-        highest_price = float(scout_summary.get("overall_highest_price") or 0.0)
-        median_price = float(scout_summary.get("overall_median_price") or 0.0)
-        average_price = float(scout_summary.get("overall_average_price") or 0.0)
-
-        # If summary was empty but listings exist, compute on the fly
-        if (median_price == 0.0 or lowest_price == 0.0) and market_prices:
-            prices = [
-                float(p["price"]) for p in market_prices if p.get("price") and float(p["price"]) > 0
-            ]
-            if prices:
-                lowest_price = min(prices)
-                highest_price = max(prices)
-                average_price = sum(prices) / len(prices)
-                sorted_p = sorted(prices)
-                mid = len(sorted_p) // 2
-                median_price = (sorted_p[mid] + sorted_p[~mid]) / 2.0
-
-        # Fallback benchmark if no listings were available
-        if median_price == 0.0:
-            median_price = 1_500_000.0
-            lowest_price = 1_200_000.0
-            highest_price = 1_800_000.0
-            average_price = 1_500_000.0
-
-        # Baseline benchmark price (use median as steady market anchor)
-        benchmark_price = median_price if median_price > 0 else average_price
-
-        # Step 2: Determine Tier Selling Prices
-        # Tier 1: Fast Sale (Online) - slightly below lowest or 5% below median for rapid turnover
-        fast_sale_price = round(min(lowest_price * 0.98 if lowest_price > 0 else benchmark_price * 0.90, benchmark_price * 0.92), -3)
-        if fast_sale_price <= 0:
-            fast_sale_price = round(benchmark_price * 0.90, -3)
-
-        # Tier 2: Patient Sale (Online) - target median / upper market price for max profit
-        patient_sale_price = round(benchmark_price, -3)
-        if patient_sale_price <= fast_sale_price:
-            patient_sale_price = round(fast_sale_price * 1.10, -3)
-
-        # Tier 3: Direct/Offline Sale (COD) - 0% platform fee, competitive local pricing
-        direct_sale_price = round(benchmark_price * 0.95, -3)
-
-        # Step 3: Financial Calculations per Tier
-        tiers: Dict[str, Any] = {}
-
-        # Helper to compute tier metrics
-        def compute_tier(selling_price: float, fee_rate: float, tier_name: str, description: str) -> Dict[str, Any]:
-            platform_fee = round(selling_price * fee_rate, 2)
-            net_payout = round(selling_price - platform_fee, 2)
-            # Max buying price to guarantee at least 15% net margin: Net Payout / (1 + 0.15)
-            max_buy_for_margin = round(net_payout / (1.0 + MIN_NET_MARGIN_RATE), -3)
-
-            tier_data: Dict[str, Any] = {
-                "tier_name": tier_name,
-                "description": description,
-                "listing_price": selling_price,
-                "platform_fee_rate": fee_rate,
-                "estimated_platform_fee": platform_fee,
-                "net_payout": net_payout,
-                "max_recommended_buy_price": max_buy_for_margin,
-            }
-
-            if capital_cost is not None and capital_cost > 0:
-                net_profit = round(net_payout - capital_cost, 2)
-                roi_pct = round((net_profit / capital_cost) * 100.0, 2)
-                margin_pct = round((net_profit / selling_price) * 100.0, 2)
-                meets_margin = margin_pct >= (MIN_NET_MARGIN_RATE * 100.0)
-
-                tier_data.update({
-                    "capital_cost": capital_cost,
-                    "projected_net_profit": net_profit,
-                    "projected_roi_pct": roi_pct,
-                    "profit_margin_pct": margin_pct,
-                    "meets_target_margin": meets_margin,
-                })
-            else:
-                tier_data.update({
-                    "meets_target_margin": True,
-                })
-
-            return tier_data
-
-        tiers["fast_sale"] = compute_tier(
-            fast_sale_price,
-            ONLINE_PLATFORM_FEE_RATE,
-            "Fast Sale (Online)",
-            "Undercut competitors on Tokopedia/Shopee for 1-3 day turnaround.",
-        )
-        tiers["patient_sale"] = compute_tier(
-            patient_sale_price,
-            ONLINE_PLATFORM_FEE_RATE,
-            "Patient Sale (Online)",
-            "Optimized for maximum profit margin on online marketplaces (7-14 days).",
-        )
-        tiers["direct_sale"] = compute_tier(
-            direct_sale_price,
-            0.0,
-            "Direct / Offline Sale (COD)",
-            "0% platform fees via Facebook Marketplace / local meetup (COD).",
+        # Calculate pricing using the deterministic pricing engine
+        pricing_strategy = calculate_pricing(
+            market_prices=market_prices,
+            scout_summary=scout_summary,
+            capital_cost=capital_cost,
+            fee_rate=ONLINE_PLATFORM_FEE_RATE,
+            min_margin_rate=MIN_NET_MARGIN_RATE,
         )
 
-        # Target acquisition price across baseline:
-        # Based on patient sale payout with 15% net margin
-        patient_net = tiers["patient_sale"]["net_payout"]
-        target_buy_price = round(patient_net / (1.0 + MIN_NET_MARGIN_RATE), -3)
-
-        pricing_strategy: Dict[str, Any] = {
-            "currency": "IDR",
-            "benchmark_median_price": benchmark_price,
-            "platform_fee_rate": ONLINE_PLATFORM_FEE_RATE,
-            "target_min_margin_rate": MIN_NET_MARGIN_RATE,
-            "target_buy_price": target_buy_price,
-            "max_buy_price": target_buy_price,
-            "tiers": tiers,
-            "summary_recommendation": (
-                f"Target acquisition price: max Rp {int(target_buy_price):,} to secure ≥15% net margin. "
-                f"Sell at Rp {int(fast_sale_price):,} for fast liquidation or Rp {int(patient_sale_price):,} for maximum yield."
-            ),
-        }
+        target_buy_price = pricing_strategy.get("target_buy_price", 0.0)
+        tiers = pricing_strategy.get("tiers", {})
+        fast_sale_price = tiers.get("fast_sale", {}).get("listing_price", 0.0)
+        patient_sale_price = tiers.get("patient_sale", {}).get("listing_price", 0.0)
+        direct_sale_price = tiers.get("direct_sale", {}).get("listing_price", 0.0)
 
         log_entry: AgentLogEntry = {
             "agent": "pricing",

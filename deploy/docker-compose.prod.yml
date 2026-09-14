@@ -1,0 +1,89 @@
+version: "3.8"
+
+services:
+  api:
+    image: ${API_IMAGE:-ghcr.io/farras-mik/reseller-agent-api:latest}
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
+    container_name: reseller-api
+    restart: unless-stopped
+    environment:
+      - ENVIRONMENT=production
+      - SCRAPER_PROXY_URL=${SCRAPER_PROXY_URL:-}
+      - SCRAPER_COOLDOWN_SECONDS=${SCRAPER_COOLDOWN_SECONDS:-2}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - SERPER_API_KEY=${SERPER_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    volumes:
+      - playwright_cache:/ms-playwright
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    networks:
+      - reseller_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  web:
+    image: ${WEB_IMAGE:-ghcr.io/farras-mik/reseller-agent-web:latest}
+    build:
+      context: ..
+      dockerfile: docker/web.Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
+    container_name: reseller-web
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - reseller_network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: reseller-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+      - ACME_EMAIL=${ACME_EMAIL:-admin@example.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - web
+    networks:
+      - reseller_network
+
+volumes:
+  playwright_cache:
+    name: reseller_playwright_cache
+  caddy_data:
+    name: reseller_caddy_data
+  caddy_config:
+    name: reseller_caddy_config
+
+networks:
+  reseller_network:
+    name: reseller_network
+    driver: bridge

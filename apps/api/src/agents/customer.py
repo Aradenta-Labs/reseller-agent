@@ -14,6 +14,9 @@ from datetime import datetime, timezone
 import logging
 from typing import Any, Dict, List, Optional, Union
 
+from enum import Enum
+from typing import Any, Dict, List, Literal, Optional, Union
+
 from pydantic import BaseModel, Field
 from src.graph.state import AgentLogEntry, ResellerState
 from src.models.auth import BYOKCredentials
@@ -23,10 +26,20 @@ from src.services.llm import DEFAULT_MODELS
 logger = logging.getLogger("reseller_api.agents.customer")
 
 
+class CustomerVerdictEnum(str, Enum):
+    """Explicit verdict possibilities for Agent 5."""
+
+    BUY = "BUY"
+    PASS = "PASS"
+    CONDITIONAL = "CONDITIONAL"
+
+
 class CustomerEvaluationSchema(BaseModel):
     """Structured response model for Customer Persona evaluation."""
 
-    verdict: str = Field(..., description="Definitive verdict: 'BUY' or 'PASS'")
+    verdict: Literal["BUY", "PASS", "CONDITIONAL"] = Field(
+        ..., description="Definitive verdict: 'BUY', 'PASS', or 'CONDITIONAL'"
+    )
     buyer_sentiment: str = Field(..., description="Overall buyer sentiment (e.g., 'Eager', 'Skeptical', 'Interested but price-sensitive')")
     perceived_value_score: int = Field(..., description="Perceived value rating from 1 to 10", ge=1, le=10)
     top_objections: List[str] = Field(default_factory=list, description="Top objections or questions a buyer will ask")
@@ -104,8 +117,13 @@ async def run_customer_persona(
             )
 
         verdict = evaluation.verdict.upper()
-        if verdict not in ["BUY", "PASS"]:
-            verdict = "BUY" if "BUY" in verdict else "PASS"
+        if verdict not in ["BUY", "PASS", "CONDITIONAL"]:
+            if "BUY" in verdict:
+                verdict = "BUY"
+            elif "CONDITION" in verdict:
+                verdict = "CONDITIONAL"
+            else:
+                verdict = "PASS"
 
         log_entry: AgentLogEntry = {
             "agent": "customer",
