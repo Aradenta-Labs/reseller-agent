@@ -3,7 +3,6 @@
 import React, { useState, useRef, DragEvent, ChangeEvent } from "react";
 import {
   Upload,
-  Image as ImageIcon,
   X,
   FileText,
   Sparkles,

@@ -5,6 +5,7 @@ from src.routes.health import router as health_router
 from src.routes.orchestrate import router as orchestrate_router
 from src.routes.parser import router as parser_router
 from src.routes.scout import router as scout_router
+from src.routes.stream import router as stream_router
 
 app = FastAPI(
     title="Reseller AI Assistant API",
@@ -32,6 +33,7 @@ app.include_router(health_router)
 app.include_router(parser_router)
 app.include_router(scout_router)
 app.include_router(orchestrate_router)
+app.include_router(stream_router)
 
 
 @app.exception_handler(ValueError)

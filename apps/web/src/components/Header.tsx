@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { checkBackendHealth } from "@/lib/api";
 import {
@@ -18,7 +18,7 @@ export function Header() {
   const [apiConnected, setApiConnected] = useState<boolean | null>(null);
 
   useEffect(() => {
-    setMounted(true);
+    // Subscription pattern avoids synchronous setState cascade warning
     let isSubscribed = true;
 
     async function verifyHealth() {
@@ -38,6 +38,13 @@ export function Header() {
     };
   }, []);
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setMounted(true);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
+
   const configured = mounted ? isConfigured() : false;
 
   return (
@@ -53,8 +60,8 @@ export function Header() {
               <span className="text-base font-semibold tracking-tight text-zinc-100">
                 Reseller AI
               </span>
-              <span className="rounded border border-zinc-700 bg-zinc-800/80 px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase text-zinc-300">
-                Phase 1
+              <span className="rounded border border-blue-500/40 bg-blue-950/60 px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase text-blue-300">
+                Swarm v1.0
               </span>
             </div>
             <p className="text-xs text-zinc-400 hidden sm:block">

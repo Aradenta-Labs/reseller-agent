@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   useSettingsStore,
   LLMProvider,
@@ -17,46 +17,59 @@ import {
   RefreshCw,
   Cpu,
   Info,
+  SlidersHorizontal,
 } from "lucide-react";
 
-const PROVIDER_OPTIONS: {
+interface ProviderConfig {
   id: LLMProvider;
   name: string;
-  description: string;
+  tagline: string;
   defaultModel: string;
   requiresKey: boolean;
-}[] = [
+  popularModels: string[];
+}
+
+const PROVIDERS: ProviderConfig[] = [
   {
     id: "openai",
     name: "OpenAI",
-    description: "GPT-4o, GPT-4o-mini (Supports vision & structured JSON)",
+    tagline: "GPT-4o & GPT-4o-mini (Vision + Structured Tool Calling)",
     defaultModel: DEFAULT_MODELS.openai,
     requiresKey: true,
+    popularModels: ["gpt-4o-mini", "gpt-4o", "o3-mini"],
   },
   {
     id: "anthropic",
     name: "Anthropic",
-    description: "Claude 3.5 Sonnet, Claude 3.5 Haiku",
+    tagline: "Claude 3.5 Sonnet & Claude 3.5 Haiku",
     defaultModel: DEFAULT_MODELS.anthropic,
     requiresKey: true,
+    popularModels: ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"],
   },
   {
     id: "openrouter",
     name: "OpenRouter",
-    description: "Unified gateway across 100+ open and proprietary models",
+    tagline: "Multi-model gateway across open-source & proprietary models",
     defaultModel: DEFAULT_MODELS.openrouter,
     requiresKey: true,
+    popularModels: [
+      "anthropic/claude-3.5-sonnet",
+      "openai/gpt-4o-mini",
+      "deepseek/deepseek-chat",
+      "meta-llama/llama-3.3-70b-instruct",
+    ],
   },
   {
     id: "mock",
     name: "Mock Mode (Zero Cost)",
-    description: "Deterministic local synthetic responses for testing without API keys",
+    tagline: "Local simulated agent swarm for testing without spending tokens",
     defaultModel: DEFAULT_MODELS.mock,
     requiresKey: false,
+    popularModels: ["mock-v1"],
   },
 ];
 
-export function SettingsModal() {
+export function BYOKModal() {
   const {
     provider,
     apiKey,
@@ -76,21 +89,9 @@ export function SettingsModal() {
     message: string;
   } | null>(null);
 
-  // Synchronize internal state when modal opens or store changes
-  useEffect(() => {
-    if (isSettingsOpen) {
-      setSelectedProvider(provider);
-      setInputKey(apiKey);
-      setInputModel(model || DEFAULT_MODELS[provider]);
-      setTestResult(null);
-    }
-  }, [isSettingsOpen, provider, apiKey, model]);
-
   if (!isSettingsOpen) return null;
 
-  const currentProviderConfig = PROVIDER_OPTIONS.find(
-    (p) => p.id === selectedProvider
-  );
+  const currentProviderConfig = PROVIDERS.find((p) => p.id === selectedProvider);
 
   const handleProviderChange = (newProvider: LLMProvider) => {
     setSelectedProvider(newProvider);
@@ -120,13 +121,13 @@ export function SettingsModal() {
       const res = await checkBackendHealth();
       setTestResult({
         success: true,
-        message: `Connected to ${res.service} v${res.version} [${res.environment}]`,
+        message: `Connected to API: ${res.service} v${res.version} [${res.environment}]`,
       });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to connect to backend";
+      const msg = err instanceof Error ? err.message : "Connection failed";
       setTestResult({
         success: false,
-        message: `${msg}. Make sure the FastAPI server is running on localhost:8000.`,
+        message: `${msg}. Ensure the FastAPI server is running on port 8000.`,
       });
     } finally {
       setTestingConnection(false);
@@ -134,68 +135,81 @@ export function SettingsModal() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-150">
-      <div className="relative w-full max-w-lg rounded-xl border border-zinc-800 bg-[#0d0f18] p-6 shadow-2xl">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="byok-modal-title"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-in fade-in duration-150"
+    >
+      <div className="relative w-full max-w-xl rounded-xl border border-zinc-800 bg-[#0d0f17] p-6 shadow-2xl space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-800 text-zinc-200">
+        <div className="flex items-start justify-between border-b border-zinc-800/80 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-800/70 text-zinc-200">
               <KeyRound className="h-4 w-4" />
             </div>
             <div>
-              <h2 className="text-base font-semibold text-zinc-100">
-                LLM & BYOK Settings
+              <h2 id="byok-modal-title" className="text-base font-semibold text-zinc-100">
+                LLM & BYOK Configuration
               </h2>
               <p className="text-xs text-zinc-400">
-                Bring Your Own Key — credentials remain purely in your browser memory
+                Bring Your Own Key — keys reside exclusively in browser memory and are sent via request headers.
               </p>
             </div>
           </div>
           <button
+            type="button"
             onClick={() => setSettingsOpen(false)}
+            aria-label="Close settings"
             className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        {/* Body */}
-        <div className="mt-5 space-y-5">
-          {/* Provider Selector */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
-              Select LLM Provider
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {PROVIDER_OPTIONS.map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => handleProviderChange(opt.id)}
-                  className={`flex flex-col text-left p-3 rounded-lg border transition-all ${
-                    selectedProvider === opt.id
-                      ? "border-blue-500/80 bg-blue-950/30 text-zinc-100 ring-1 ring-blue-500/50"
-                      : "border-zinc-800 bg-zinc-900/40 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800/40"
-                  }`}
-                >
-                  <div className="flex items-center justify-between font-medium text-xs">
-                    <span>{opt.name}</span>
-                    {selectedProvider === opt.id && (
-                      <CheckCircle2 className="h-3.5 w-3.5 text-blue-400" />
-                    )}
-                  </div>
-                  <span className="text-[11px] text-zinc-400 mt-1 line-clamp-2 leading-tight">
-                    {opt.description}
-                  </span>
-                </button>
-              ))}
+        {/* Content */}
+        <div className="space-y-5">
+          {/* Provider Selection */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                LLM Provider
+              </label>
+              <span className="text-[11px] text-zinc-500">Select inference backend</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {PROVIDERS.map((opt) => {
+                const isSelected = selectedProvider === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => handleProviderChange(opt.id)}
+                    className={`flex flex-col text-left p-3 rounded-lg border transition-all ${
+                      isSelected
+                        ? "border-blue-500/70 bg-blue-950/30 text-zinc-100 ring-1 ring-blue-500/30"
+                        : "border-zinc-800/90 bg-zinc-900/40 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800/30"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between font-medium text-xs">
+                      <span>{opt.name}</span>
+                      {isSelected && (
+                        <CheckCircle2 className="h-3.5 w-3.5 text-blue-400 shrink-0" />
+                      )}
+                    </div>
+                    <span className="text-[11px] text-zinc-400 mt-1 line-clamp-2 leading-relaxed">
+                      {opt.tagline}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          {/* API Key Input (if required) */}
+          {/* Key Input Section */}
           {currentProviderConfig?.requiresKey ? (
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
                 <label className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
                   {currentProviderConfig.name} API Key
                 </label>
@@ -210,36 +224,38 @@ export function SettingsModal() {
                   </button>
                 )}
               </div>
-              <div className="relative">
-                <input
-                  type="password"
-                  value={inputKey}
-                  onChange={(e) => setInputKey(e.target.value)}
-                  placeholder={`Enter your ${currentProviderConfig.name} API key...`}
-                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3.5 py-2 text-xs font-mono text-zinc-100 placeholder-zinc-500 focus:border-blue-500 focus:outline-hidden focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-              <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-zinc-400">
+              <input
+                type="password"
+                value={inputKey}
+                onChange={(e) => setInputKey(e.target.value)}
+                placeholder={`sk-... or your ${currentProviderConfig.name} API key`}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3.5 py-2 text-xs font-mono text-zinc-100 placeholder-zinc-500 focus:border-blue-500 focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+              />
+              <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">
                 <ShieldCheck className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                <span>
-                  Never saved to backend databases. Attached only as request headers.
-                </span>
+                <span>Encrypted in memory only. Never logged or persisted on backend.</span>
               </div>
             </div>
           ) : (
-            <div className="rounded-lg border border-blue-900/40 bg-blue-950/20 p-3 text-xs text-blue-300 flex items-start gap-2">
+            <div className="rounded-lg border border-blue-900/40 bg-blue-950/20 p-3 text-xs text-blue-300 flex items-start gap-2.5">
               <Info className="h-4 w-4 text-blue-400 shrink-0 mt-0.5" />
               <span>
-                Mock mode returns structured dummy item data instantly without invoking external LLM APIs. Useful for UI testing and local verification.
+                Mock mode runs simulated agents with realistic Indonesian marketplace figures without consuming external API credits.
               </span>
             </div>
           )}
 
-          {/* Model Specification */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">
-              Model Identifier
-            </label>
+          {/* Model Specification & Presets */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                Model Identifier
+              </label>
+              <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">
+                <SlidersHorizontal className="h-3 w-3" />
+                <span>Presets available</span>
+              </div>
+            </div>
             <div className="flex items-center gap-2">
               <div className="relative flex-1">
                 <Cpu className="absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-500" />
@@ -257,15 +273,35 @@ export function SettingsModal() {
                 className="rounded-lg border border-zinc-700 bg-zinc-800/80 px-2.5 py-2 text-xs text-zinc-300 hover:bg-zinc-700 transition-colors"
                 title="Reset to default model"
               >
-                Reset
+                Default
               </button>
             </div>
+
+            {/* Quick model pills */}
+            {currentProviderConfig && currentProviderConfig.popularModels.length > 1 && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {currentProviderConfig.popularModels.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setInputModel(m)}
+                    className={`rounded-md border px-2 py-0.5 text-[11px] font-mono transition-colors ${
+                      inputModel === m
+                        ? "border-blue-500/60 bg-blue-950/40 text-blue-300"
+                        : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Test Status feedback */}
           {testResult && (
             <div
-              className={`rounded-lg border p-3 text-xs flex items-start gap-2 ${
+              className={`rounded-lg border p-3 text-xs flex items-start gap-2.5 ${
                 testResult.success
                   ? "border-emerald-800/50 bg-emerald-950/30 text-emerald-300"
                   : "border-rose-800/50 bg-rose-950/30 text-rose-300"
@@ -282,7 +318,7 @@ export function SettingsModal() {
         </div>
 
         {/* Footer actions */}
-        <div className="mt-6 flex items-center justify-between border-t border-zinc-800 pt-4">
+        <div className="flex items-center justify-between border-t border-zinc-800/80 pt-4">
           <button
             type="button"
             onClick={handleTestConnection}
@@ -292,7 +328,7 @@ export function SettingsModal() {
             <RefreshCw
               className={`h-3.5 w-3.5 ${testingConnection ? "animate-spin" : ""}`}
             />
-            {testingConnection ? "Checking..." : "Test Backend API"}
+            {testingConnection ? "Testing..." : "Test Health"}
           </button>
 
           <div className="flex items-center gap-2">

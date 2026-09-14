@@ -6,8 +6,9 @@ Orchestration architecture:
 - Sequential pipeline: `pricing_strategist` -> `chief_strategist` -> `customer_persona` -> END.
 """
 
+import datetime
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from langgraph.graph import END, START, StateGraph
 
@@ -147,3 +148,152 @@ async def run_reseller_orchestration(
 
     final_state = await app.ainvoke(state_payload)
     return final_state
+
+
+NODE_METADATA: Dict[str, Dict[str, str]] = {
+    "market_scout": {
+        "display_name": "Market Scout",
+        "start_status": "Searching Tokopedia, Shopee, and FB Marketplace...",
+    },
+    "trend_analyst": {
+        "display_name": "Trend Analyst",
+        "start_status": "Analyzing search trends, hype velocity, and seasonality...",
+    },
+    "pricing_strategist": {
+        "display_name": "Pricing Strategist",
+        "start_status": "Calculating 3 price tiers, margins, and platform fees...",
+    },
+    "chief_strategist": {
+        "display_name": "Chief Strategist",
+        "start_status": "Synthesizing master action plan and listing playbook...",
+    },
+    "customer_persona": {
+        "display_name": "Customer Persona",
+        "start_status": "Evaluating buyer objections and determining BUY/PASS verdict...",
+    },
+}
+
+
+async def stream_reseller_orchestration(
+    initial_state: Dict[str, Any],
+    credentials: Optional[BYOKCredentials] = None,
+    mock: bool = False,
+    platforms: Optional[List[str]] = None,
+    **kwargs: Any,
+) -> AsyncGenerator[Dict[str, Any], None]:
+    """Execute the LangGraph swarm workflow and stream real-time events at node boundaries.
+
+    Yields:
+        - `AGENT_START`: emitted when an agent node starts executing.
+        - `AGENT_COMPLETE`: emitted when an agent node finishes with its output data.
+        - `FINAL_RESULT`: emitted upon successful completion of the full workflow with final state.
+        - `ERROR`: emitted if an unhandled exception occurs during execution.
+    """
+    try:
+        app = create_reseller_graph(
+            credentials=credentials,
+            mock=mock,
+            platforms=platforms,
+            **kwargs,
+        )
+
+        state_payload: ResellerState = {
+            "user_input": initial_state.get("user_input", ""),
+            "item_description": initial_state.get("item_description", {}),
+            "capital_cost": initial_state.get("capital_cost"),
+            "market_prices": initial_state.get("market_prices", []),
+            "scout_summary": initial_state.get("scout_summary"),
+            "trend_analysis": initial_state.get("trend_analysis", ""),
+            "pricing_strategy": initial_state.get("pricing_strategy", {}),
+            "final_strategy": initial_state.get("final_strategy", ""),
+            "customer_verdict": initial_state.get("customer_verdict", "PASS"),
+            "errors": initial_state.get("errors", []),
+            "agent_logs": initial_state.get("agent_logs", []),
+        }
+
+        tracked_nodes = set(NODE_METADATA.keys())
+        accumulated_state: Dict[str, Any] = dict(state_payload)
+
+        async for event in app.astream_events(state_payload, version="v2"):
+            node_name = event.get("name")
+            event_type = event.get("event")
+
+            if node_name in tracked_nodes:
+                meta = NODE_METADATA[node_name]
+                display_name = meta["display_name"]
+                now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+                if event_type == "on_chain_start":
+                    yield {
+                        "type": "AGENT_START",
+                        "agent": node_name,
+                        "agent_name": display_name,
+                        "status": meta["start_status"],
+                        "timestamp": now_iso,
+                    }
+                elif event_type == "on_chain_end":
+                    node_output = event.get("data", {}).get("output")
+                    if isinstance(node_output, dict):
+                        # Merge into accumulated state for the final result
+                        for k, v in node_output.items():
+                            if k == "agent_logs" or k == "errors":
+                                existing_list = accumulated_state.get(k, [])
+                                accumulated_state[k] = (existing_list or []) + (v or [])
+                            else:
+                                accumulated_state[k] = v
+
+                    # Determine completion summary message
+                    result_summary = ""
+                    if node_name == "market_scout":
+                        count = len(accumulated_state.get("market_prices", []))
+                        result_summary = f"Gathered {count} marketplace listings."
+                    elif node_name == "trend_analyst":
+                        result_summary = "Market demand and hype velocity analyzed."
+                    elif node_name == "pricing_strategist":
+                        pricing = accumulated_state.get("pricing_strategy", {})
+                        max_buy = pricing.get("max_buy_price", pricing.get("target_buy_price"))
+                        result_summary = f"Formulated 3 price tiers (Max buy: Rp {max_buy:,.0f})." if max_buy else "Formulated 3 price tiers."
+                    elif node_name == "chief_strategist":
+                        result_summary = "Synthesized master resale playbook."
+                    elif node_name == "customer_persona":
+                        verdict = accumulated_state.get("customer_verdict", "PASS")
+                        result_summary = f"Evaluated listing value (Verdict: {verdict})."
+
+                    yield {
+                        "type": "AGENT_COMPLETE",
+                        "agent": node_name,
+                        "agent_name": display_name,
+                        "result": result_summary,
+                        "data": node_output if isinstance(node_output, dict) else {},
+                        "timestamp": now_iso,
+                    }
+
+        # Workflow finished, emit FINAL_RESULT
+        final_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        yield {
+            "type": "FINAL_RESULT",
+            "status": "success",
+            "verdict": accumulated_state.get("customer_verdict", "PASS"),
+            "customer_verdict": accumulated_state.get("customer_verdict", "PASS"),
+            "final_strategy": accumulated_state.get("final_strategy", ""),
+            "pricing_strategy": accumulated_state.get("pricing_strategy", {}),
+            "market_prices": accumulated_state.get("market_prices", []),
+            "scout_summary": accumulated_state.get("scout_summary"),
+            "trend_analysis": accumulated_state.get("trend_analysis", ""),
+            "user_input": accumulated_state.get("user_input", ""),
+            "item_description": accumulated_state.get("item_description", {}),
+            "capital_cost": accumulated_state.get("capital_cost"),
+            "agent_logs": accumulated_state.get("agent_logs", []),
+            "errors": accumulated_state.get("errors", []),
+            "timestamp": final_iso,
+        }
+
+    except Exception as e:
+        logger.error("Error during streaming reseller orchestration: %s", str(e), exc_info=True)
+        yield {
+            "type": "ERROR",
+            "error": str(e),
+            "message": f"Swarm orchestration failed: {str(e)}",
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+
