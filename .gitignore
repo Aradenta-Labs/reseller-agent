@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+.env
+
+# Next.js
+apps/web/.next/
+apps/web/out/
+
+# FastAPI
+apps/api/.venv/
+
+# Playwright browsers
+apps/api/.playwright/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Environment files
+.env
+.env.local
+.env.production
+.env*.local
